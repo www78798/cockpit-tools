@@ -1,0 +1,22 @@
+services:
+  cockpit-tools:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: cockpit-tools-desktop:local
+    container_name: cockpit-tools
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6080:6080"
+    environment:
+      SCREEN_SIZE: "1600x1000x24"
+      NOVNC_PORT: "6080"
+    volumes:
+      - cockpit-home:/home/cockpit
+    shm_size: "1gb"
+    security_opt:
+      - no-new-privileges:true
+    init: true
+
+volumes:
+  cockpit-home:
