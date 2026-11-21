@@ -1,0 +1,84 @@
+name: Docker GUI image
+
+on:
+  push:
+    branches: [main, feature/docker-gui]
+    paths:
+      - "docker/**"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - ".github/workflows/docker-gui.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "src-tauri/**"
+      - "src/**"
+      - "scripts/**"
+      - "resources/**"
+  pull_request:
+    paths:
+      - "docker/**"
+      - "docker-compose.yml"
+      - ".dockerignore"
+      - ".github/workflows/docker-gui.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "src-tauri/**"
+      - "src/**"
+      - "scripts/**"
+      - "resources/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build desktop image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          tags: cockpit-tools-desktop:ci
+          load: true
+          cache-from: type=gha,scope=cockpit-tools-docker-gui
+          cache-to: type=gha,mode=max,scope=cockpit-tools-docker-gui
+
+      - name: Check image runtime dependencies
+        run: |
+          docker run --rm --entrypoint bash cockpit-tools-desktop:ci -lc '
+            test -x /usr/local/bin/cockpit-tools
+            command -v Xvfb
+            command -v x11vnc
+            command -v websockify
+            test -d /usr/share/novnc
+          '
+
+      - name: Launch desktop and verify noVNC endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run -d --name cockpit-tools-smoke -p 127.0.0.1:6080:6080 cockpit-tools-desktop:ci
+          cleanup() { docker logs cockpit-tools-smoke || true; docker rm -f cockpit-tools-smoke >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:6080/vnc.html >/dev/null; then
+              echo "noVNC is responding"
+              exit 0
+            fi
+            if ! docker inspect -f '{{.State.Running}}' cockpit-tools-smoke | grep -q true; then
+              echo "Container exited before noVNC became ready"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "Timed out waiting for noVNC"
+          exit 1
